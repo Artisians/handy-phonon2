@@ -17,14 +17,38 @@ $model = Join-Path $testRoot 'downloaded model'
 cargo run --locked --manifest-path tests/phonon-model-install/Cargo.toml --example install -- $runtime (Join-Path $testRoot 'phonon-2.bps.tar.zst') $model
 if ($LASTEXITCODE -ne 0) { throw 'Installed automatic model setup failed' }
 $wav = Join-Path $testRoot 'speech fixture.wav'
-& $python -I -B -c "import soundfile as sf,sys; data,rate=sf.read(sys.argv[1]); sf.write(sys.argv[2],data,rate,subtype='PCM_16')" (Join-Path $testRoot 'jfk.flac') $wav
+& $python -I -B -m unittest discover -s tests/phonon-audio -v
+if ($LASTEXITCODE -ne 0) { throw 'ASR fixture conversion regression tests failed' }
+& $python -I -B scripts/phonon/prepare_test_audio.py (Join-Path $testRoot 'jfk.flac') $wav
 if ($LASTEXITCODE -ne 0) { throw 'ASR fixture conversion failed' }
 $output = Join-Path $testRoot 'production-asr.json'
 $exe = Join-Path $ApplicationDirectory 'handy.exe'
 $arguments = @('--transcribe-file', "`"$wav`"", '--model', 'phonon-2-local', '--json', '--repeat', '2', '--phonon-test-model-dir', "`"$model`"", '--phonon-test-output', "`"$output`"")
-$process = Start-Process $exe -ArgumentList $arguments -WorkingDirectory $ApplicationDirectory -PassThru
-if (-not $process.WaitForExit(360000)) { $process.Kill(); throw 'Production managed Phonon ASR timed out' }
-if ($process.ExitCode -ne 0 -or -not (Test-Path $output)) { throw "Production managed Phonon ASR failed: $($process.ExitCode)" }
+$stdout = Join-Path $testRoot 'production-asr.stdout.txt'
+$stderr = Join-Path $testRoot 'production-asr.stderr.txt'
+function Write-AsrDiagnostics {
+    # This is an ephemeral runner with only the pinned public speech fixture.
+    # Bound diagnostic output and never include environment variables/credentials.
+    foreach ($path in @($stderr, $stdout, $output)) {
+        if (Test-Path $path) {
+            $diagnostic = (Get-Content $path -Tail 60) -join "`n"
+            if ($diagnostic.Length -gt 12000) { $diagnostic = $diagnostic.Substring($diagnostic.Length - 12000) }
+            Write-Host "ASR diagnostic ($([System.IO.Path]::GetFileName($path))):"
+            Write-Host $diagnostic
+        }
+    }
+}
+$process = Start-Process $exe -ArgumentList $arguments -WorkingDirectory $ApplicationDirectory -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+if (-not $process.WaitForExit(360000)) {
+    $process.Kill()
+    $process.WaitForExit(10000) | Out-Null
+    Write-AsrDiagnostics
+    throw 'Production managed Phonon ASR timed out'
+}
+if ($process.ExitCode -ne 0 -or -not (Test-Path $output)) {
+    Write-AsrDiagnostics
+    throw "Production managed Phonon ASR failed: $($process.ExitCode)"
+}
 $result = Get-Content $output -Raw | ConvertFrom-Json
 if ($result.runtime_stopped -ne $true -or $result.texts.Count -ne 2) { throw 'Managed ASR repeat/shutdown proof missing' }
 foreach ($text in $result.texts) {
