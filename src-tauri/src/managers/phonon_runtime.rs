@@ -27,6 +27,12 @@ struct ProcessState {
     status: RuntimeStatus,
 }
 
+#[cfg(test)]
+struct ProbeGate {
+    entered: std::sync::mpsc::Sender<()>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
 pub struct PhononRuntime {
     root: PathBuf,
     startup: Mutex<()>,
@@ -36,6 +42,8 @@ pub struct PhononRuntime {
     cancelled: AtomicBool,
     #[cfg(test)]
     fake_mode: Option<&'static str>,
+    #[cfg(test)]
+    probe_gate: Option<ProbeGate>,
     timeout: Duration,
 }
 
@@ -57,6 +65,8 @@ impl PhononRuntime {
             cancelled: AtomicBool::new(false),
             #[cfg(test)]
             fake_mode: None,
+            #[cfg(test)]
+            probe_gate: None,
             timeout: Duration::from_secs(180),
         }
     }
@@ -213,7 +223,20 @@ impl PhononRuntime {
                         bail!("Bundled Phonon-2 could not start ({exit}). Close memory-heavy apps and retry. If it keeps failing, reinstall the complete Handy Phonon installer.");
                     }
                 }
-                if super::phonon::check_owned_health(&connection).is_ok() {
+                let healthy = super::phonon::check_owned_health(&connection).is_ok();
+                #[cfg(test)]
+                if let Some(gate) = &self.probe_gate {
+                    gate.entered.send(()).context("Test probe signal failed")?;
+                    gate.release
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(10))
+                        .context("Test probe release timed out")?;
+                }
+                // The HTTP probe can block until its deadline. A cancellation
+                // during that interval must win over either readiness or timeout.
+                self.check_generation(generation)?;
+                if healthy {
                     let mut state = self.lock();
                     self.check_generation(generation)?;
                     if state
@@ -396,29 +419,57 @@ mod tests {
 
     #[test]
     fn cancelling_pending_start_prevents_stale_success_and_allows_retry() {
-        let (runtime, root) = fixture("slow");
+        let (mut runtime, root) = fixture("slow");
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        {
+            let runtime = Arc::get_mut(&mut runtime).unwrap();
+            // Reproduce the Windows race deterministically: by the time the
+            // failed health request finishes, readiness has already expired.
+            runtime.timeout = Duration::ZERO;
+            runtime.probe_gate = Some(ProbeGate {
+                entered: entered_tx,
+                release: Mutex::new(release_rx),
+            });
+        }
         let worker_runtime = runtime.clone();
         let model = root.join("model with spaces");
         let worker = std::thread::spawn(move || worker_runtime.ensure_running(&model));
-        while runtime.status().state != "starting" {
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        assert!(
+            entered_rx.recv_timeout(Duration::from_secs(10)).is_ok(),
+            "Startup did not reach the health probe: {} {:?}",
+            runtime.status().state,
+            runtime.status().error
+        );
         runtime.cancel_start();
-        assert!(worker
+        release_tx.send(()).unwrap();
+        let error = worker
             .join()
-            .unwrap()
+            .expect("Startup worker panicked")
             .err()
-            .unwrap()
-            .to_string()
-            .contains("cancelled"));
+            .expect("Cancelled startup unexpectedly succeeded");
+        assert!(
+            error.to_string().contains("cancelled"),
+            "Expected cancellation, received: {error:#}"
+        );
         assert_eq!(runtime.status().state, "stopped");
         assert!(runtime.lock().child.is_none());
         // A Cancel arriving before the launch worker starts is also respected.
         assert!(runtime
             .ensure_running(&root.join("model with spaces"))
             .is_err());
+        {
+            let runtime = Arc::get_mut(&mut runtime).unwrap();
+            runtime.probe_gate = None;
+            runtime.fake_mode = Some("ready");
+            runtime.timeout = Duration::from_secs(10);
+        }
         runtime.allow_start();
-        assert!(!runtime.cancelled.load(Ordering::SeqCst));
+        runtime
+            .ensure_running(&root.join("model with spaces"))
+            .expect("Retry after cancellation failed");
+        assert_eq!(runtime.status().state, "ready");
+        runtime.stop();
         std::fs::remove_dir_all(root).unwrap();
     }
 
