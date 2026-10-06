@@ -107,7 +107,7 @@ jobs:
       - name: Build unsigned Windows x64 installer
         timeout-minutes: 75
         run: |
-          bun run tauri build --no-sign --bundles nsis -- --locked
+          node node_modules/@tauri-apps/cli/tauri.js build --no-sign --bundles nsis -- --locked
           if ($LASTEXITCODE -ne 0) { throw 'Windows release build failed' }
 
       - name: Verify installer payload and create portable ZIP and hashes
