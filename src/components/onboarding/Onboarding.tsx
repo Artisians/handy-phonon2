@@ -5,7 +5,6 @@ import { ChevronDown } from "lucide-react";
 import type { ModelInfo } from "@/bindings";
 import type { ModelCardStatus } from "./ModelCard";
 import ModelCard, { isLegacySource } from "./ModelCard";
-import { PHONON_MODEL_ID } from "../model-selector/PhononSetupCard";
 import HandyTextLogo from "../icons/HandyTextLogo";
 import { useModelStore } from "../../stores/modelStore";
 
@@ -43,8 +42,7 @@ const Onboarding: React.FC<OnboardingProps> = ({
   // Streaming (multilingual). Everything else hides behind "Show all".
   const { downloadable, topPicks, otherRecommended, rest } = useMemo(() => {
     const downloadable = models.filter(
-      (m: ModelInfo) =>
-        m.id !== PHONON_MODEL_ID && !m.is_downloaded && !isLegacySource(m),
+      (m: ModelInfo) => !m.is_downloaded && !isLegacySource(m),
     );
     const recommended = downloadable.filter((m: ModelInfo) => m.is_recommended);
     // `models` arrives in editorial rank order (the backend sorts by rank_of,
@@ -172,9 +170,7 @@ const Onboarding: React.FC<OnboardingProps> = ({
 
       <div className="max-w-[600px] w-full mx-auto text-center flex-1 flex flex-col min-h-0">
         <div className="space-y-6 pb-6">
-          {models.some(
-            (m: ModelInfo) => m.id !== PHONON_MODEL_ID && m.is_downloaded,
-          ) && (
+          {models.some((m: ModelInfo) => m.is_downloaded) && (
             <div className="space-y-3">
               <div className="text-left">
                 <h2 className="text-sm font-medium text-text/60">
@@ -182,9 +178,7 @@ const Onboarding: React.FC<OnboardingProps> = ({
                 </h2>
               </div>
               {models
-                .filter(
-                  (m: ModelInfo) => m.id !== PHONON_MODEL_ID && m.is_downloaded,
-                )
+                .filter((m: ModelInfo) => m.is_downloaded)
                 .map((model: ModelInfo) => (
                   <ModelCard
                     key={model.id}
@@ -197,23 +191,6 @@ const Onboarding: React.FC<OnboardingProps> = ({
                 ))}
             </div>
           )}
-
-          {models
-            .filter((model) => model.id === PHONON_MODEL_ID)
-            .map((model) => (
-              <div key={model.id} className="space-y-3">
-                <h2 className="text-left text-sm font-medium text-text/60">
-                  {t("phonon.externalServices")}
-                </h2>
-                <ModelCard
-                  model={model}
-                  status={getExistingModelStatus(model.id)}
-                  disabled={isBusy}
-                  onSelect={handleSelectExistingModel}
-                  showRecommended={false}
-                />
-              </div>
-            ))}
 
           {downloadable.length > 0 && (
             <div className="space-y-3">

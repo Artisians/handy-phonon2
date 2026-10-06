@@ -45,3 +45,6 @@ result
 
 # Python bytecode (scripts/)
 __pycache__/
+
+# Generated self-contained Windows speech runtime
+/src-tauri/resources/phonon-runtime/

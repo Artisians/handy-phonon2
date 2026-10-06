@@ -1,0 +1,10 @@
+[package]
+name = "handy-phonon-model-install-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1.0.95"
+tempfile = "3"
+sha2 = "0.10"

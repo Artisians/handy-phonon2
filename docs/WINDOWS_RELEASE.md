@@ -89,8 +89,12 @@ packaged runtime DLLs/resources, and runs `--help` and `--list-devices` with tim
 It creates a portable ZIP from the actual installer payload, clears only the
 throwaway smoke-test data, computes SHA-256 hashes, stages a draft release,
 downloads all its assets again to verify hashes, and publishes a prerelease only
-after those checks pass. It never signs into ChatGPT, records audio, calls real
-inference, or downloads full speech-model weights.
+after those checks pass. It never signs into ChatGPT or records microphone audio.
+The pinned model and a public speech fixture are downloaded into disposable CI
+storage to verify actual ASR twice through Handy's managed runtime, including
+automatic model reconstruction and backend shutdown. Test weights/audio are
+never shipped in the installer or portable ZIP. The embedded Python runtime, all
+42 dependencies and installed payload files are hash/version/isolation checked.
 
 Only the single release job has `contents: write`, needed to deliver files
 straight to Releases without an Actions-artifact transfer between jobs. Checkout
@@ -104,8 +108,9 @@ Published payloads:
 - `Handy-Phonon-0.9.8-windows-x64-portable.zip`: extract, then launch `handy.exe`
 - `SHA256SUMS.txt`, `BUILD_PROVENANCE.json`, and `FORK_NOTICE.md`
 
-Full speech weights and the separately configured Phonon/Fermion server are not
-included. The small upstream VAD resource is included for normal microphone use.
+The Python/Fermion CPU runtime is included internally, with complete dependency
+notices. Full Phonon weights download through Handy's regular model manager; no
+separate service setup is needed. The small upstream VAD resource is included.
 See [fork identity and update policy](FORK_NOTICE.md) and
 [local Phonon setup](PHONON_WINDOWS.md). Confirm microphone/hotkeys/paste, local
 GPU inference and real account sign-in on the destination Windows PC; hosted

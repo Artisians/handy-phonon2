@@ -20,6 +20,8 @@ use tar::Archive;
 use tauri::{AppHandle, Emitter, Manager};
 
 mod download;
+mod phonon_download;
+mod phonon_install;
 
 use download::{HttpDownloadOutcome, DOWNLOAD_STALL_TIMEOUT};
 
@@ -549,6 +551,7 @@ pub struct ModelManager {
     /// Single-flight guard for [`Self::rescan_local_models`] so concurrent
     /// refresh requests coalesce instead of scanning the disk in parallel.
     is_rescanning: Arc<AtomicBool>,
+    phonon_operation: AtomicBool,
 }
 
 impl ModelManager {
@@ -1143,16 +1146,17 @@ impl ModelManager {
             },
         );
 
-        // Installed adapter, not downloaded weights: the official external
-        // server owns the model cache. Never auto-select this optional service.
-        available_models.insert("phonon-2-local".into(), ModelInfo {
-            id: "phonon-2-local".into(), name: "Phonon-2 (local server)".into(),
-            description: "English dictation via the official local Phonon-2 CPU server. Requires separate setup on port 8010.".into(),
-            filename: String::new(), source: ModelSource::Local, size_mb: 0,
-            is_downloaded: true, is_downloading: false, partial_size: 0,
-            is_directory: false, engine_type: EngineType::Phonon2,
+        // Preserve the stable ID so existing preferences survive this upgrade.
+        available_models.insert(phonon_install::MODEL_ID.into(), ModelInfo {
+            id: phonon_install::MODEL_ID.into(), name: "Phonon-2".into(),
+            description: "English dictation with the bundled CPU runtime. Download once, then transcribe offline; no Python setup.".into(),
+            filename: phonon_install::DIRECTORY.into(),
+            source: ModelSource::Url { url: phonon_install::URL.into(), sha256: Some(phonon_install::ARCHIVE_SHA256.into()) },
+            size_mb: 164,
+            is_downloaded: false, is_downloading: false, partial_size: 0,
+            is_directory: true, engine_type: EngineType::Phonon2,
             accuracy_score: 0.0, speed_score: 0.0,
-            supports_translation: false, is_recommended: false,
+            supports_translation: false, is_recommended: true,
             supported_languages: vec!["en".into()], supports_language_selection: false,
             is_custom: false, supports_streaming: false, supports_language_detection: false,
         });
@@ -1179,6 +1183,7 @@ impl ModelManager {
             cancel_flags: Arc::new(Mutex::new(HashMap::new())),
             extracting_models: Arc::new(Mutex::new(HashSet::new())),
             is_rescanning: Arc::new(AtomicBool::new(false)),
+            phonon_operation: AtomicBool::new(false),
         };
 
         // Migrate any bundled models to user directory
@@ -1206,8 +1211,15 @@ impl ModelManager {
         // and name. `ModelInfo` doesn't carry rank, so resolve it by id from the
         // catalog here.
         list.sort_by(|a, b| {
-            crate::catalog::rank_of(&a.id)
-                .cmp(&crate::catalog::rank_of(&b.id))
+            let rank = |model: &ModelInfo| {
+                if matches!(model.engine_type, EngineType::Phonon2) {
+                    0
+                } else {
+                    crate::catalog::rank_of(&model.id).saturating_add(1)
+                }
+            };
+            rank(a)
+                .cmp(&rank(b))
                 .then((!a.is_recommended).cmp(&(!b.is_recommended)))
                 .then(b.accuracy_score.total_cmp(&a.accuracy_score))
                 .then(b.speed_score.total_cmp(&a.speed_score))
@@ -1423,7 +1435,18 @@ impl ModelManager {
 
         for model in models.values_mut() {
             if matches!(model.engine_type, EngineType::Phonon2) {
-                model.is_downloaded = true; // Adapter availability; health checked on load.
+                model.is_downloaded =
+                    phonon_install::is_installed(&self.models_dir.join(phonon_install::DIRECTORY));
+                model.is_downloading = downloading_ids.contains(&model.id);
+                model.partial_size = if model.is_downloaded {
+                    0
+                } else {
+                    self.models_dir
+                        .join(phonon_install::ARCHIVE)
+                        .metadata()
+                        .map(|m| m.len())
+                        .unwrap_or(0)
+                };
                 continue;
             }
             if let ModelSource::HuggingFace { repo_id, revision } = &model.source {
@@ -1593,9 +1616,11 @@ impl ModelManager {
         // If no model is selected, pick the first downloaded one using the same
         // ranked order the UI receives.
         if settings.selected_model.is_empty() {
-            if let Some(available_model) = self.get_available_models().into_iter().find(|model| {
-                model.is_downloaded && !matches!(model.engine_type, EngineType::Phonon2)
-            }) {
+            if let Some(available_model) = self
+                .get_available_models()
+                .into_iter()
+                .find(|model| model.is_downloaded)
+            {
                 info!(
                     "Auto-selecting model: {} ({})",
                     available_model.id, available_model.name
@@ -2237,10 +2262,8 @@ impl ModelManager {
     }
 
     pub async fn download_model(&self, model_id: &str) -> Result<()> {
-        if model_id == "phonon-2-local" {
-            anyhow::bail!(
-                "Phonon-2 is managed by the external Fermion server, not Handy downloads"
-            );
+        if model_id == phonon_install::MODEL_ID {
+            return self.download_phonon_model().await;
         }
         let model_info = {
             let models = self.available_models.lock().unwrap();
@@ -2440,10 +2463,8 @@ impl ModelManager {
     }
 
     pub fn delete_model(&self, model_id: &str) -> Result<()> {
-        if model_id == "phonon-2-local" {
-            anyhow::bail!(
-                "Phonon-2 is managed by the external Fermion server, not Handy downloads"
-            );
+        if model_id == phonon_install::MODEL_ID {
+            return self.delete_phonon_model();
         }
         debug!("ModelManager: delete_model called for: {}", model_id);
 
@@ -2611,8 +2632,13 @@ impl ModelManager {
     }
 
     pub fn get_model_path(&self, model_id: &str) -> Result<PathBuf> {
-        if model_id == "phonon-2-local" {
-            anyhow::bail!("Phonon-2 has no Handy model file; it uses the local Fermion server");
+        if model_id == phonon_install::MODEL_ID {
+            let path = self.models_dir.join(phonon_install::DIRECTORY);
+            if phonon_install::is_installed(&path) {
+                return Ok(path);
+            }
+            self.mark_model_unavailable(model_id);
+            anyhow::bail!("Phonon-2 is not installed. Choose Download in the model manager first.");
         }
         let model_info = self
             .get_model_info(model_id)
@@ -2704,6 +2730,12 @@ impl ModelManager {
             } else {
                 warn!("No active download found for: {}", model_id);
             }
+        }
+
+        // Phonon setup must exit and remove staging before retry is exposed.
+        // Its async owner emits cancellation after the child has been reaped.
+        if model_id == phonon_install::MODEL_ID {
+            return Ok(());
         }
 
         // Update state immediately for UI responsiveness

@@ -75,6 +75,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 tar = "0.4.44"
 flate2 = "1.0"
 sha2 = "0.10"
+hmac = "0.12"
 base64 = "0.22"
 rand = "0.8"
 jsonwebtoken = "9"

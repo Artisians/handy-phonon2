@@ -787,21 +787,18 @@
     "dismiss": "Dismiss"
   },
   "phonon": {
-    "title": "Phonon-2 (local server)",
-    "external": "External service · Windows x64 · English · CPU",
-    "selected": "Selected",
-    "description": "Keep Handy’s microphone, hotkey and paste workflow, with speech recognition handled by a separately running Phonon-2 service on this computer.",
-    "statusNote": "The adapter is included; the service and model weights are not installed by Handy. Selection checks the server once. It does not continuously monitor availability.",
-    "setup": "Windows setup instructions",
-    "install": "Install Python 3.12 x64 first. In PowerShell, create a dedicated environment and install the official Fermion package. Dependencies are resolved at install time; this is not a fully locked environment.",
-    "installCommands": "py -3.12 -m venv .venv-phonon\n.\\.venv-phonon\\Scripts\\python.exe -m pip install fermion-research==0.2.7 torch safetensors soundfile scipy zstandard",
-    "start": "Start the service from the same folder and leave this terminal open. Wait for model loading to finish, then choose Check and select. Close the terminal or press Ctrl+C to stop the service.",
-    "startCommand": ".\\.venv-phonon\\Scripts\\fermion.exe serve phonon-2 --host 127.0.0.1 --port 8010",
-    "privacy": "First startup downloads model files from Hugging Face and needs internet access. Audio requests use only 127.0.0.1:8010. Keep the loopback host; do not expose the unauthenticated service to your network. Handy normally retains local audio and transcript history. History and any separately enabled cloud post-processing follow your existing settings.",
-    "limits": "English transcription only; no translation or live streaming in this adapter. Windows ARM is unsupported. CPU latency depends on your hardware. This Windows integration still needs end-to-end validation on a Windows PC. Recordings are limited to 120 seconds. Cancel suppresses output, but inference may drain until its response or approximately 185-second combined request timeout before you can record again.",
-    "attribution": "Handy: CJ Pais, MIT. Phonon: Fermion Research, Apache-2.0 code; Phonon-2 weights: CC BY 4.0 with upstream NVIDIA/Fermion notices. Sources and full setup: docs/PHONON_WINDOWS.md in this fork.",
-    "checking": "Checking server…",
-    "checkAndSelect": "Check and select",
-    "externalServices": "External local services"
+    "statusNote": "English · CPU · Windows x64. Download once, then Handy starts and stops Phonon-2 automatically. No separate setup.",
+    "details": "Privacy and model details",
+    "privacy": "The model downloads from Hugging Face. After setup, speech recognition runs locally using an authenticated connection on this computer. Local history and any separately enabled cloud text cleanup follow your existing settings.",
+    "limits": "English only; no translation or live streaming. Recordings are limited to 120 seconds. CPU speed depends on your hardware. Cancelling dictation suppresses output, but the current inference may finish before another recording can start.",
+    "attribution": "Handy: CJ Pais, MIT. Phonon: Fermion Research, Apache-2.0 code. Phonon-2 weights: CC BY 4.0 with upstream NVIDIA/Fermion notices.",
+    "retry": "Retry and select",
+    "cancelling": "Cancelling…",
+    "runtime": {
+      "stopped": "Starts automatically when selected or needed.",
+      "starting": "Starting Phonon-2… This may take a few minutes.",
+      "ready": "Phonon-2 is running locally.",
+      "error": "Phonon-2 needs attention."
+    }
   }
 }

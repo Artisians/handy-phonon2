@@ -2579,6 +2579,7 @@ dependencies = [
  "gtk-layer-shell",
  "handy-keys",
  "hf-hub",
+ "hmac",
  "hound",
  "isolang",
  "jsonwebtoken",

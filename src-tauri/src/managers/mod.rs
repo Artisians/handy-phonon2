@@ -4,4 +4,5 @@ pub mod history;
 pub mod model;
 pub mod model_capabilities;
 pub mod phonon;
+pub mod phonon_runtime;
 pub mod transcription;

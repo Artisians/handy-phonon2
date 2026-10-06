@@ -1,4 +1,4 @@
-> **Experimental Windows Phonon-2 fork:** optional English CPU recognition through a separately running local Fermion service. [Setup, privacy, licenses, and Windows validation checklist](docs/PHONON_WINDOWS.md). Windows end-to-end validation is still required.
+> **Experimental Windows Phonon-2 fork:** install Handy Phonon, open **Models**, and download **Phonon-2** like the other models. Handy handles setup, startup, switching and removal; no separate Python installation or terminal is needed. Recognition runs locally on the CPU. [Setup, privacy, licenses and validation](docs/PHONON_WINDOWS.md). [Verification status](docs/PHONON_VERIFICATION.md).
 
 # Handy
 
@@ -36,7 +36,7 @@ The process is entirely local:
 
 ### Installation
 
-1. Download the latest release from the [releases page](https://github.com/cjpais/Handy/releases) or the [website](https://handy.computer)
+1. **For this Windows fork**, use a verified installer or portable ZIP from the [Handy Phonon releases](https://github.com/Artisians/handy-phonon2/releases). The upstream [Handy releases](https://github.com/cjpais/Handy/releases) and [website](https://handy.computer) do not include this integration.
    - **macOS**: Also available via [Homebrew cask](https://formulae.brew.sh/cask/handy): `brew install --cask handy`
    - **Windows**: Also available via [winget](https://github.com/microsoft/winget-pkgs): `winget install cjpais.Handy` \
      **Note:** The Homebrew cask and winget package are not maintained by the Handy developers.
@@ -48,7 +48,7 @@ The process is entirely local:
 2. Install the application
 3. Launch Handy and grant necessary system permissions (microphone, accessibility)
 4. Configure your preferred keyboard shortcuts in Settings
-5. Start transcribing!
+5. Open **Models**, download Phonon-2 or another model, select it and start transcribing!
 
 ### Development Setup
 

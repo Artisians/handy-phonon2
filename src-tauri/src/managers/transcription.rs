@@ -537,13 +537,10 @@ impl TranscriptionManager {
             return Err(anyhow::anyhow!(error_msg));
         }
 
-        let model_path = if matches!(model_info.engine_type, EngineType::Phonon2) {
-            std::path::PathBuf::new() // No local file: the external server owns the weights.
-        } else {
-            self.model_manager
-                .get_model_path(model_id)
-                .inspect_err(|error| emit_loading_failed(&error.to_string()))?
-        };
+        let model_path = self
+            .model_manager
+            .get_model_path(model_id)
+            .inspect_err(|error| emit_loading_failed(&error.to_string()))?;
 
         // Drop the current engine BEFORE building the new one so transcribe-cpp
         // frees the previous native context first — avoids holding two models at
@@ -562,8 +559,14 @@ impl TranscriptionManager {
 
         let loaded_engine = match model_info.engine_type {
             EngineType::Phonon2 => LoadedEngine::Phonon2(
-                super::phonon::PhononEngine::connect()
-                    .inspect_err(|error| emit_loading_failed(&format!("{error:#}")))?,
+                super::phonon::PhononEngine::connect_managed(
+                    self.app_handle
+                        .state::<Arc<super::phonon_runtime::PhononRuntime>>()
+                        .inner()
+                        .clone(),
+                    model_path.clone(),
+                )
+                .inspect_err(|error| emit_loading_failed(&format!("{error:#}")))?,
             ),
             EngineType::TranscribeCpp => {
                 // The whisper backend is chosen at load time (transcribe-cpp has

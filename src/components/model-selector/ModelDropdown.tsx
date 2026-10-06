@@ -1,6 +1,5 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { PHONON_MODEL_ID } from "./PhononSetupCard";
 import type { ModelInfo } from "@/bindings";
 import {
   getTranslatedModelName,
@@ -68,11 +67,7 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({
                 </div>
                 {currentModelId === model.id && (
                   <div className="text-xs text-logo-primary">
-                    {t(
-                      model.id === PHONON_MODEL_ID
-                        ? "phonon.selected"
-                        : "modelSelector.active",
-                    )}
+                    {t("modelSelector.active")}
                   </div>
                 )}
               </div>

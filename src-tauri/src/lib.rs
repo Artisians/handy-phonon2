@@ -171,7 +171,7 @@ fn should_force_show_permissions_window(app: &AppHandle) -> bool {
         let has_downloaded_models = model_manager
             .get_available_models()
             .iter()
-            .any(|model| model.is_downloaded && model.id != "phonon-2-local");
+            .any(|model| model.is_downloaded);
 
         if !has_downloaded_models {
             return false;
@@ -535,6 +535,44 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
     };
     let audio_secs = samples.len() as f64 / 16_000.0;
 
+    if let Some(model_dir) = &args.phonon_test_model_dir {
+        let result = (|| -> anyhow::Result<serde_json::Value> {
+            let runtime = app
+                .state::<Arc<managers::phonon_runtime::PhononRuntime>>()
+                .inner()
+                .clone();
+            let started = std::time::Instant::now();
+            let engine = managers::phonon::PhononEngine::connect_managed(
+                runtime.clone(),
+                model_dir.clone(),
+            )?;
+            let mut texts = Vec::new();
+            for _ in 0..args.repeat.unwrap_or(1).clamp(1, 10) {
+                texts.push(engine.transcribe(&samples)?);
+            }
+            drop(engine);
+            anyhow::ensure!(
+                runtime.status().state == "stopped",
+                "Managed Phonon process did not stop"
+            );
+            Ok(
+                serde_json::json!({"model": "phonon-2-local", "texts": texts, "elapsed_ms": started.elapsed().as_millis(), "audio_secs": audio_secs, "runtime_stopped": true}),
+            )
+        })();
+        let output = match &result {
+            Ok(value) => value.clone(),
+            Err(error) => serde_json::json!({"error": format!("{error:#}")}),
+        };
+        if let Some(path) = &args.phonon_test_output {
+            if let Err(error) = std::fs::write(path, output.to_string()) {
+                eprintln!("Could not write Phonon test result: {error}");
+                return 1;
+            }
+        }
+        println!("{output}");
+        return if result.is_ok() { 0 } else { 1 };
+    }
+
     let tm = app.state::<Arc<TranscriptionManager>>();
 
     let model_id = args
@@ -747,6 +785,8 @@ pub fn run(cli_args: CliArgs) {
             commands::models::delete_model,
             commands::models::cancel_download,
             commands::models::set_active_model,
+            commands::models::phonon_runtime_status,
+            commands::models::cancel_phonon_start,
             commands::models::get_current_model,
             commands::models::get_transcription_model_status,
             commands::models::is_model_loading,
@@ -909,6 +949,8 @@ pub fn run(cli_args: CliArgs) {
             );
 
             specta_builder.mount_events(app);
+            let runtime_root = app.path().resolve("resources/phonon-runtime", tauri::path::BaseDirectory::Resource)?;
+            app.manage(Arc::new(managers::phonon_runtime::PhononRuntime::new(runtime_root)));
 
             // Headless one-shot path (`--transcribe-file` / `--list-devices` /
             // `--list-models`): initialize only what transcription needs — the
@@ -941,6 +983,9 @@ pub fn run(cli_args: CliArgs) {
                     // are still alive at C++ static-destructor time.
                     if let Some(tm) = handle.try_state::<Arc<TranscriptionManager>>() {
                         let _ = tm.unload_model();
+                    }
+                    if let Some(runtime) = handle.try_state::<Arc<managers::phonon_runtime::PhononRuntime>>() {
+                        runtime.shutdown();
                     }
                     // process::exit (not app.exit, which exits 0 regardless) so the
                     // exit code propagates to the shell for CI gating. Flush first
@@ -1131,6 +1176,9 @@ pub fn run(cli_args: CliArgs) {
         }
         // Teardown transcribe.cpp before exit
         tauri::RunEvent::Exit => {
+            if let Some(runtime) = app.try_state::<Arc<managers::phonon_runtime::PhononRuntime>>() {
+                runtime.shutdown();
+            }
             if let Some(tm) = app.try_state::<Arc<TranscriptionManager>>() {
                 let _ = tm.unload_model();
             }

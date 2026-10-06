@@ -4,7 +4,6 @@ import { listen } from "@tauri-apps/api/event";
 import { commands } from "@/bindings";
 import { getTranslatedModelName } from "../../lib/utils/modelTranslation";
 import { useModelStore } from "../../stores/modelStore";
-import { PHONON_MODEL_ID } from "./PhononSetupCard";
 import ModelStatusButton from "./ModelStatusButton";
 import ModelDropdown from "./ModelDropdown";
 import DownloadProgressDisplay from "./DownloadProgressDisplay";
@@ -240,10 +239,6 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ onError }) => {
     if (Object.keys(verifyingModels).length > 0) return "verifying";
     if (Object.keys(extractingModels).length > 0) return "extracting";
     if (Object.keys(downloadProgress).length > 0) return "downloading";
-    // A loaded adapter is not proof the external process is still healthy.
-    if (displayModelId === PHONON_MODEL_ID && modelStatus === "ready") {
-      return "unloaded";
-    }
     return modelStatus;
   };
 

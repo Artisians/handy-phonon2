@@ -14,10 +14,10 @@ foreach ($pattern in @('*transcribe*', '*ggml*')) {
 if ((Get-AuthenticodeSignature $installer.FullName).Status -ne 'NotSigned') { throw 'Expected an explicitly unsigned fork installer' }
 
 # Exercise the actual installer in its upstream-supported portable mode.
-$portable = Join-Path $env:RUNNER_TEMP 'Handy-Phonon-Portable'
+$portable = Join-Path $env:RUNNER_TEMP 'Handy Phonon Portable'
 New-Item $portable -ItemType Directory -Force | Out-Null
 $install = Start-Process $installer.FullName -ArgumentList @('/S', '/PORTABLE', "/D=$portable") -PassThru
-if (-not $install.WaitForExit(120000)) { $install.Kill(); throw 'Portable installer timed out' }
+if (-not $install.WaitForExit(300000)) { $install.Kill(); throw 'Portable installer timed out' }
 if ($install.ExitCode -ne 0) { throw "Portable installer failed: $($install.ExitCode)" }
 $exe = Join-Path $portable 'handy.exe'
 foreach ($file in @($exe, (Join-Path $portable 'portable'), (Join-Path $portable 'resources/models/silero_vad_v4.onnx'), (Join-Path $portable 'resources/models/SILERO_LICENSE.txt'))) {
@@ -27,7 +27,11 @@ foreach ($dll in $stagedDlls) {
     if (-not (Test-Path (Join-Path $portable $dll.Name))) { throw "Package missing runtime DLL $($dll.Name)" }
 }
 
-# No microphone, login, transcription request or full speech model is needed.
+# First verify actual runtime installation and real speech recognition through
+# Handy's managed child process. Only disposable CI test models are downloaded.
+./scripts/ci/test-phonon-package.ps1 -ApplicationDirectory $portable
+
+# Ordinary app CLI checks also remain required.
 foreach ($argument in @('--help', '--list-devices')) {
     $stdout = Join-Path $env:RUNNER_TEMP "smoke-$($argument.TrimStart('-')).txt"
     $stderr = "$stdout.err"
@@ -63,7 +67,8 @@ $hashes | Set-Content (Join-Path $out 'SHA256SUMS.txt') -Encoding utf8NoBOM
 "HANDY_DELIVERY_DIR=$out" >> $env:GITHUB_ENV
 @"
 ## Windows package checks passed
-- NSIS portable installation, packaged DLL/resource presence, CLI help and CPU device enumeration passed.
-- Unsigned installer plus portable ZIP; no full speech models or authentication data.
+- NSIS portable installation, complete runtime hashes, embedded Python isolation/ABI, automatic model setup and real managed Phonon ASR passed.
+- CLI help and CPU device enumeration passed.
+- Unsigned installer plus portable ZIP, with internal Phonon runtime. Model weights download through Handy; no authentication data is included.
 - Microphone, hotkeys, GPU inference and real ChatGPT sign-in still need user-device validation.
 "@ >> $env:GITHUB_STEP_SUMMARY

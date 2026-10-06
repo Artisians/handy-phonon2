@@ -69,6 +69,21 @@ pub async fn delete_model(
     transcription_manager: State<'_, Arc<TranscriptionManager>>,
     model_id: String,
 ) -> Result<(), String> {
+    // Prevent deletion racing a new Phonon load. Only terminate our owned child.
+    let _loading_guard = if model_id == "phonon-2-local" {
+        Some(
+            transcription_manager
+                .try_start_loading()
+                .ok_or_else(|| "Model load already in progress".to_string())?,
+        )
+    } else {
+        None
+    };
+    if model_id == "phonon-2-local" {
+        app_handle
+            .state::<Arc<crate::managers::phonon_runtime::PhononRuntime>>()
+            .stop();
+    }
     // If deleting the active model, unload it and clear the setting
     let settings = get_settings(&app_handle);
     if settings.selected_model == model_id {
@@ -93,6 +108,14 @@ pub async fn delete_model(
 /// unless the unload timeout is set to "Immediately" (in which case the model
 /// will be loaded on-demand during the next transcription).
 pub fn switch_active_model(app: &AppHandle, model_id: &str) -> Result<(), String> {
+    if model_id == "phonon-2-local" {
+        app.state::<Arc<crate::managers::phonon_runtime::PhononRuntime>>()
+            .allow_start();
+    }
+    switch_active_model_impl(app, model_id)
+}
+
+fn switch_active_model_impl(app: &AppHandle, model_id: &str) -> Result<(), String> {
     let model_manager = app.state::<Arc<ModelManager>>();
     let transcription_manager = app.state::<Arc<TranscriptionManager>>();
 
@@ -117,10 +140,22 @@ pub fn switch_active_model(app: &AppHandle, model_id: &str) -> Result<(), String
     let old_model = settings.selected_model.clone();
     let old_onboarding_completed = settings.onboarding_completed;
 
-    // Selecting this external adapter is also the setup readiness check. Even
-    // with lazy loading, fail before changing settings if the server is absent.
+    // Even lazy selection starts the installer-owned runtime and verifies readiness.
     if model_id == "phonon-2-local" && unload_timeout == ModelUnloadTimeout::Immediately {
-        crate::managers::phonon::PhononEngine::connect().map_err(|error| format!("{error:#}"))?;
+        let runtime = app.state::<Arc<crate::managers::phonon_runtime::PhononRuntime>>();
+        let model_path = model_manager
+            .get_model_path(model_id)
+            .map_err(|error| format!("{error:#}"))?;
+        runtime
+            .ensure_running(&model_path)
+            .map_err(|error| format!("{error:#}"))?;
+        runtime.stop();
+    }
+
+    if unload_timeout == ModelUnloadTimeout::Immediately {
+        transcription_manager
+            .unload_model()
+            .map_err(|error| format!("{error:#}"))?;
     }
 
     // Persist the new selection early so the frontend sees the correct model
@@ -172,7 +207,40 @@ pub async fn set_active_model(
     _transcription_manager: State<'_, Arc<TranscriptionManager>>,
     model_id: String,
 ) -> Result<(), String> {
-    switch_active_model(&app_handle, &model_id)
+    if model_id == "phonon-2-local" {
+        app_handle
+            .state::<Arc<crate::managers::phonon_runtime::PhononRuntime>>()
+            .allow_start();
+    }
+    tokio::task::spawn_blocking(move || switch_active_model_impl(&app_handle, &model_id))
+        .await
+        .map_err(|error| format!("Model loading worker stopped: {error}"))?
+}
+
+#[derive(serde::Serialize, specta::Type)]
+pub struct PhononStatus {
+    state: String,
+    error: Option<String>,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn phonon_runtime_status(app_handle: AppHandle) -> PhononStatus {
+    let status = app_handle
+        .state::<Arc<crate::managers::phonon_runtime::PhononRuntime>>()
+        .status();
+    PhononStatus {
+        state: status.state,
+        error: status.error,
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn cancel_phonon_start(app_handle: AppHandle) {
+    app_handle
+        .state::<Arc<crate::managers::phonon_runtime::PhononRuntime>>()
+        .cancel_start();
 }
 
 #[tauri::command]
@@ -208,5 +276,11 @@ pub async fn cancel_download(
 ) -> Result<(), String> {
     model_manager
         .cancel_download(&model_id)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if model_id == "phonon-2-local" {
+        while model_manager.is_phonon_operation_active() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+    Ok(())
 }

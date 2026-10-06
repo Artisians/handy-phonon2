@@ -57,6 +57,14 @@ pub struct CliArgs {
     #[arg(long, value_name = "N")]
     pub repeat: Option<usize>,
 
+    /// Installer CI only: exercise the production managed runtime with prepared weights.
+    #[arg(long, hide = true, requires = "transcribe_file")]
+    pub phonon_test_model_dir: Option<PathBuf>,
+
+    /// Installer CI result destination (the Windows GUI executable has no console).
+    #[arg(long, hide = true, requires = "phonon_test_model_dir")]
+    pub phonon_test_output: Option<PathBuf>,
+
     /// Emit --transcribe-file results as JSON.
     #[arg(long)]
     pub json: bool,

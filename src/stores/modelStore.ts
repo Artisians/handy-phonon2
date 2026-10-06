@@ -32,6 +32,7 @@ interface ModelsStore {
   error: string | null;
   initialized: boolean;
   isRescanning: boolean;
+  selectionPending: boolean;
 
   // Actions
   initialize: () => Promise<void>;
@@ -68,6 +69,7 @@ export const useModelStore = create<ModelsStore>()(
     error: null,
     initialized: false,
     isRescanning: false,
+    selectionPending: false,
 
     // Internal setters
     setModels: (models) => set({ models }),
@@ -143,12 +145,15 @@ export const useModelStore = create<ModelsStore>()(
     },
 
     selectModel: async (modelId: string) => {
+      // Ignore repeated clicks while the backend owns the model-loading slot.
+      if (get().selectionPending) return false;
+      set({ selectionPending: true });
       try {
         set({ error: null });
         const result = await commands.setActiveModel(modelId);
         if (result.status === "ok") {
-          set({ currentModel: modelId });
-          return true;
+          await get().loadCurrentModel();
+          return get().currentModel === modelId;
         } else {
           set({ error: `Failed to switch to model: ${result.error}` });
           return false;
@@ -156,6 +161,8 @@ export const useModelStore = create<ModelsStore>()(
       } catch (err) {
         set({ error: `Failed to switch to model: ${err}` });
         return false;
+      } finally {
+        set({ selectionPending: false });
       }
     },
 
@@ -181,6 +188,8 @@ export const useModelStore = create<ModelsStore>()(
           set(
             produce((state) => {
               delete state.downloadingModels[modelId];
+              delete state.verifyingModels[modelId];
+              delete state.extractingModels[modelId];
               delete state.downloadProgress[modelId];
               delete state.downloadStats[modelId];
             }),
@@ -193,6 +202,8 @@ export const useModelStore = create<ModelsStore>()(
         set(
           produce((state) => {
             delete state.downloadingModels[modelId];
+            delete state.verifyingModels[modelId];
+            delete state.extractingModels[modelId];
             delete state.downloadProgress[modelId];
             delete state.downloadStats[modelId];
           }),
@@ -209,6 +220,8 @@ export const useModelStore = create<ModelsStore>()(
           set(
             produce((state) => {
               delete state.downloadingModels[modelId];
+              delete state.verifyingModels[modelId];
+              delete state.extractingModels[modelId];
               delete state.downloadProgress[modelId];
               delete state.downloadStats[modelId];
             }),
@@ -325,6 +338,7 @@ export const useModelStore = create<ModelsStore>()(
           produce((state) => {
             delete state.downloadingModels[modelId];
             delete state.verifyingModels[modelId];
+            delete state.extractingModels[modelId];
             delete state.downloadProgress[modelId];
             delete state.downloadStats[modelId];
           }),
@@ -340,6 +354,7 @@ export const useModelStore = create<ModelsStore>()(
             produce((state) => {
               delete state.downloadingModels[modelId];
               delete state.verifyingModels[modelId];
+              delete state.extractingModels[modelId];
               delete state.downloadProgress[modelId];
               delete state.downloadStats[modelId];
               state.error = error;
@@ -405,6 +420,7 @@ export const useModelStore = create<ModelsStore>()(
           produce((state) => {
             delete state.downloadingModels[modelId];
             delete state.verifyingModels[modelId];
+            delete state.extractingModels[modelId];
             delete state.downloadProgress[modelId];
             delete state.downloadStats[modelId];
           }),

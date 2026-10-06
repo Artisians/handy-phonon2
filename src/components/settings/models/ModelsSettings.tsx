@@ -11,13 +11,13 @@ import {
 } from "lucide-react";
 import type { ModelCardStatus } from "@/components/onboarding";
 import { ModelCard } from "@/components/onboarding";
+import { isLegacySource } from "@/components/onboarding/ModelCard";
 import { useModelStore } from "@/stores/modelStore";
 import {
   getLanguageLabel,
   MODEL_CAPABILITY_LANGUAGES,
   supportsLanguageCode,
 } from "@/lib/constants/languages.ts";
-import { PHONON_MODEL_ID } from "@/components/model-selector/PhononSetupCard";
 import type { ModelInfo } from "@/bindings";
 
 // check if model supports a language based on its supported_languages list
@@ -28,8 +28,7 @@ const modelSupportsLanguage = (model: ModelInfo, langCode: string): boolean => {
 // Legacy models are the blob (Url-sourced) .bin/ONNX downloads, superseded by
 // the catalog GGUFs. They stay runnable when already on disk, but we no longer
 // advertise the download.
-const isLegacyModel = (model: ModelInfo): boolean =>
-  typeof model.source === "object" && "Url" in model.source;
+const isLegacyModel = isLegacySource;
 
 export const ModelsSettings: React.FC = () => {
   const { t } = useTranslation();
@@ -132,6 +131,7 @@ export const ModelsSettings: React.FC = () => {
   };
 
   const handleModelSelect = async (modelId: string) => {
+    if (useModelStore.getState().selectionPending) return;
     setSwitchingModelId(modelId);
     try {
       await selectModel(modelId);
@@ -197,16 +197,11 @@ export const ModelsSettings: React.FC = () => {
   }, [models, languageFilter, filterStreaming, filterTranslation, searchQuery]);
 
   // Split filtered models into downloaded (including custom) and available sections
-  const { downloadedModels, availableModels, externalModels } = useMemo(() => {
+  const { downloadedModels, availableModels } = useMemo(() => {
     const downloaded: ModelInfo[] = [];
     const available: ModelInfo[] = [];
-    const external: ModelInfo[] = [];
 
     for (const model of filteredModels) {
-      if (model.id === PHONON_MODEL_ID) {
-        external.push(model);
-        continue;
-      }
       if (
         model.is_custom ||
         model.is_downloaded ||
@@ -230,7 +225,6 @@ export const ModelsSettings: React.FC = () => {
     return {
       downloadedModels: downloaded,
       availableModels: available,
-      externalModels: external,
     };
   }, [filteredModels, downloadingModels, extractingModels, currentModel]);
 
@@ -418,6 +412,7 @@ export const ModelsSettings: React.FC = () => {
               key={model.id}
               model={model}
               status={getModelStatus(model.id)}
+              disabled={switchingModelId !== null}
               onSelect={handleModelSelect}
               onDownload={handleModelDownload}
               onDelete={handleModelDelete}
@@ -428,23 +423,6 @@ export const ModelsSettings: React.FC = () => {
             />
           ))}
         </div>
-
-        {externalModels.length > 0 && (
-          <div className="space-y-3">
-            <h2 className="text-sm font-medium text-text/60">
-              {t("phonon.externalServices")}
-            </h2>
-            {externalModels.map((model) => (
-              <ModelCard
-                key={model.id}
-                model={model}
-                status={getModelStatus(model.id)}
-                onSelect={handleModelSelect}
-                showRecommended={false}
-              />
-            ))}
-          </div>
-        )}
 
         {/* Available Models Section */}
         {availableModels.length > 0 && (
@@ -457,6 +435,7 @@ export const ModelsSettings: React.FC = () => {
                 key={model.id}
                 model={model}
                 status={getModelStatus(model.id)}
+                disabled={switchingModelId !== null}
                 onSelect={handleModelSelect}
                 onDownload={handleModelDownload}
                 onDelete={handleModelDelete}

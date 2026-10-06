@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AudioLines,
@@ -47,7 +47,9 @@ const getLanguageDisplayText = (
 // Legacy = a blob (Url-sourced) .bin/ONNX model, kept runnable but no longer the
 // advertised download (catalog GGUFs supersede it).
 export const isLegacySource = (model: ModelInfo): boolean =>
-  typeof model.source === "object" && "Url" in model.source;
+  model.engine_type !== "Phonon2" &&
+  typeof model.source === "object" &&
+  "Url" in model.source;
 
 // Extract a GGUF quantization label from a filename, if present (e.g. "Q8_0").
 const getQuantLabel = (filename: string): string | null => {
@@ -75,7 +77,7 @@ interface ModelCardProps {
   onSelect: (modelId: string) => void;
   onDownload?: (modelId: string) => void;
   onDelete?: (modelId: string) => void;
-  onCancel?: (modelId: string) => void;
+  onCancel?: (modelId: string) => void | Promise<void>;
   downloadProgress?: number;
   downloadSpeed?: number; // MB/s
   showRecommended?: boolean;
@@ -96,19 +98,25 @@ const ModelCard: React.FC<ModelCardProps> = ({
   showRecommended = true,
 }) => {
   const { t } = useTranslation();
+  const [cancellingDownload, setCancellingDownload] = useState(false);
+  useEffect(() => {
+    if (!["downloading", "verifying", "extracting"].includes(status))
+      setCancellingDownload(false);
+  }, [status]);
+  const cancelDownload = async (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (cancellingDownload) return;
+    setCancellingDownload(true);
+    try {
+      await onCancel?.(model.id);
+    } finally {
+      setCancellingDownload(false);
+    }
+  };
   const debugMode = useSettingsStore(
     (state) => state.settings?.debug_mode ?? false,
   );
-  if (model.id === PHONON_MODEL_ID) {
-    return (
-      <PhononSetupCard
-        selected={status === "active"}
-        busy={status === "switching"}
-        disabled={disabled}
-        onSelect={onSelect}
-      />
-    );
-  }
   const isFeatured = variant === "featured";
   // The active model is already loaded — re-selecting it just reloads it for no
   // gain, so it is deliberately not clickable.
@@ -240,6 +248,14 @@ const ModelCard: React.FC<ModelCardProps> = ({
         )}
       </div>
 
+      {model.id === PHONON_MODEL_ID && (
+        <PhononSetupCard
+          installed={model.is_downloaded}
+          busy={status === "switching"}
+          disabled={disabled}
+          onSelect={onSelect}
+        />
+      )}
       <hr className="w-full border-mid-gray/20" />
 
       {/* Bottom row: tags + action buttons (full width) */}
@@ -293,6 +309,7 @@ const ModelCard: React.FC<ModelCardProps> = ({
             variant="ghost"
             size="sm"
             onClick={handleDelete}
+            disabled={disabled}
             title={t("modelSelector.deleteModel", { modelName: displayName })}
             className="flex items-center gap-1.5 text-logo-primary/85 hover:text-logo-primary hover:bg-logo-primary/10"
           >
@@ -329,11 +346,8 @@ const ModelCard: React.FC<ModelCardProps> = ({
                 <Button
                   variant="danger-ghost"
                   size="sm"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onCancel(model.id);
-                  }}
+                  disabled={cancellingDownload}
+                  onClick={(event) => void cancelDownload(event)}
                   aria-label={t("modelSelector.cancelDownload")}
                 >
                   {t("modelSelector.cancel")}
@@ -353,6 +367,18 @@ const ModelCard: React.FC<ModelCardProps> = ({
           </p>
         </div>
       )}
+      {model.id === PHONON_MODEL_ID &&
+        onCancel &&
+        (status === "extracting" || status === "verifying") && (
+          <Button
+            variant="danger-ghost"
+            size="sm"
+            disabled={cancellingDownload}
+            onClick={(event) => void cancelDownload(event)}
+          >
+            {t("modelSelector.cancel")}
+          </Button>
+        )}
       {status === "extracting" && (
         <div className="w-full mt-3">
           <div className="w-full h-1.5 bg-mid-gray/20 rounded-full overflow-hidden">

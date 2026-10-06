@@ -1,18 +1,63 @@
-//! Phonon-2's official local HTTP API. No model weights or Python interpreter
-//! are bundled. A separately started Fermion server keeps the model resident.
+//! Phonon-2 HTTP adapter for the installer-owned, authenticated local runtime.
 use anyhow::{bail, Context, Result};
+use hmac::{Hmac, Mac};
 use reqwest::blocking::Client;
 use serde_json::Value;
+use sha2::Sha256;
 use std::io::{Cursor, Read};
 use std::time::Duration;
 
 const ENDPOINT: &str = "http://127.0.0.1:8010";
 const MAX_SAMPLES: usize = 16_000 * 120;
 const MAX_RESPONSE_BYTES: u64 = 512_000;
-const SETUP: &str =
-    "Start the official local server first: fermion serve phonon-2 --host 127.0.0.1 --port 8010";
+const SETUP: &str = "Retry Phonon-2 from Models. If it keeps failing, reinstall the complete Handy Phonon installer.";
 
-pub struct PhononEngine;
+pub struct PhononEngine {
+    runtime: Option<std::sync::Arc<super::phonon_runtime::PhononRuntime>>,
+    model_dir: std::path::PathBuf,
+}
+
+pub(crate) fn check_owned_health(connection: &super::phonon_runtime::Connection) -> Result<()> {
+    authenticated_health(
+        &client(Duration::from_secs(2))?,
+        &connection.endpoint,
+        &connection.token,
+    )
+}
+
+fn authenticated_health(client: &Client, endpoint: &str, token: &str) -> Result<()> {
+    // Do not reveal the bearer secret to an unverified port. A fresh challenge
+    // must be signed by the secret passed only to our owned child process.
+    let challenge = uuid::Uuid::new_v4().to_string();
+    let response = client
+        .get(format!("{endpoint}/health"))
+        .header("X-Handy-Phonon-Challenge", &challenge)
+        .timeout(Duration::from_secs(2))
+        .send()?;
+    let proof = response
+        .headers()
+        .get("x-handy-phonon-proof")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let decoded: Option<Vec<u8>> = if proof.len() == 64 && proof.is_ascii() {
+        (0..64)
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&proof[index..index + 2], 16).ok())
+            .collect()
+    } else {
+        None
+    };
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(token.as_bytes()).context("Invalid Phonon session key")?;
+    mac.update(challenge.as_bytes());
+    if decoded
+        .as_deref()
+        .is_none_or(|proof| mac.verify_slice(proof).is_err())
+    {
+        bail!("Phonon-2 process identity changed. No recording or session key was sent. {SETUP}");
+    }
+    validate_health(&read_json(response)?)
+}
 
 fn client(timeout: Duration) -> Result<Client> {
     Ok(Client::builder()
@@ -27,7 +72,7 @@ fn read_json(response: reqwest::blocking::Response) -> Result<Value> {
     // Do not echo response bodies: an error may contain private transcript data.
     if !response.status().is_success() {
         bail!(
-            "Phonon-2 local server returned HTTP {}. Check its console and setup instructions.",
+            "Phonon-2 local server returned HTTP {}. Retry from Models or reinstall Handy Phonon.",
             response.status()
         );
     }
@@ -46,7 +91,7 @@ fn validate_health(health: &Value) -> Result<()> {
         || health.get("kind").and_then(Value::as_str) != Some("speech")
         || health.get("model").and_then(Value::as_str) != Some("FermionResearch/Phonon-2")
     {
-        bail!("Port 8010 is not serving the expected Phonon-2 speech model. {SETUP}");
+        bail!("The local endpoint is not serving the expected Phonon-2 speech model. {SETUP}");
     }
     Ok(())
 }
@@ -93,15 +138,27 @@ fn transcript(value: Value) -> Result<String> {
 }
 
 fn request_transcription(endpoint: &str, wav: Vec<u8>, timeout: Duration) -> Result<String> {
+    request_authenticated_transcription(endpoint, None, wav, timeout)
+}
+
+fn request_authenticated_transcription(
+    endpoint: &str,
+    token: Option<&str>,
+    wav: Vec<u8>,
+    timeout: Duration,
+) -> Result<String> {
     let client = client(timeout)?;
-    // Recheck identity in case a different service replaced the backend.
-    validate_health(&read_json(
-        client
-            .get(format!("{endpoint}/health"))
-            .timeout(Duration::from_secs(5))
-            .send()
-            .with_context(|| format!("Phonon-2 disconnected. {SETUP}"))?,
-    )?)?;
+    if let Some(token) = token {
+        authenticated_health(&client, endpoint, token)?;
+    } else {
+        validate_health(&read_json(
+            client
+                .get(format!("{endpoint}/health"))
+                .timeout(Duration::from_secs(5))
+                .send()
+                .with_context(|| format!("Phonon-2 disconnected. {SETUP}"))?,
+        )?)?;
+    }
     let form = reqwest::blocking::multipart::Form::new()
         .text("model", "phonon-2")
         .text("response_format", "json")
@@ -111,15 +168,31 @@ fn request_transcription(endpoint: &str, wav: Vec<u8>, timeout: Duration) -> Res
                 .file_name("dictation.wav")
                 .mime_str("audio/wav")?,
         );
-    let response = client
+    let mut request = client
         .post(format!("{endpoint}/v1/audio/transcriptions"))
-        .multipart(form)
+        .multipart(form);
+    if let Some(token) = token {
+        request = request.bearer_auth(token);
+    }
+    let response = request
         .send()
         .context("Phonon-2 transcription failed or timed out; check the local server")?;
     transcript(read_json(response)?)
 }
 
 impl PhononEngine {
+    pub fn connect_managed(
+        runtime: std::sync::Arc<super::phonon_runtime::PhononRuntime>,
+        model_dir: std::path::PathBuf,
+    ) -> Result<Self> {
+        runtime.ensure_running(&model_dir)?;
+        Ok(Self {
+            runtime: Some(runtime),
+            model_dir,
+        })
+    }
+
+    /// Development-only smoke adapter. The desktop app exclusively uses connect_managed.
     pub fn connect() -> Result<Self> {
         // reqwest's blocking client creates a runtime. Isolate it from Tauri's
         // async context, including client destruction, to avoid nested-runtime panics.
@@ -132,14 +205,39 @@ impl PhononEngine {
         })
         .join()
         .map_err(|_| anyhow::anyhow!("Phonon-2 connection worker stopped"))??;
-        Ok(Self)
+        Ok(Self {
+            runtime: None,
+            model_dir: std::path::PathBuf::new(),
+        })
     }
 
     pub fn transcribe(&self, audio: &[f32]) -> Result<String> {
         let wav = encode_wav(audio)?;
-        std::thread::spawn(move || request_transcription(ENDPOINT, wav, Duration::from_secs(180)))
-            .join()
-            .map_err(|_| anyhow::anyhow!("Phonon-2 transcription worker stopped"))?
+        let runtime = self.runtime.clone();
+        let model_dir = self.model_dir.clone();
+        std::thread::spawn(move || {
+            if let Some(runtime) = runtime {
+                let connection = runtime.ensure_running(&model_dir)?;
+                request_authenticated_transcription(
+                    &connection.endpoint,
+                    Some(&connection.token),
+                    wav,
+                    Duration::from_secs(180),
+                )
+            } else {
+                request_transcription(ENDPOINT, wav, Duration::from_secs(180))
+            }
+        })
+        .join()
+        .map_err(|_| anyhow::anyhow!("Phonon-2 transcription worker stopped"))?
+    }
+}
+
+impl Drop for PhononEngine {
+    fn drop(&mut self) {
+        if let Some(runtime) = &self.runtime {
+            runtime.stop();
+        }
     }
 }
 
@@ -227,6 +325,23 @@ mod tests {
                     .unwrap_or(0);
                 bytes.resize(header_end + length, 0);
                 socket.read_exact(&mut bytes[header_end..]).unwrap();
+                let status = if status == "200 OK with test proof" {
+                    let challenge = headers
+                        .lines()
+                        .find_map(|line| line.strip_prefix("x-handy-phonon-challenge: "))
+                        .unwrap();
+                    let mut mac = Hmac::<Sha256>::new_from_slice(b"private-test-token").unwrap();
+                    mac.update(challenge.as_bytes());
+                    let proof: String = mac
+                        .finalize()
+                        .into_bytes()
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect();
+                    format!("200 OK\r\nX-Handy-Phonon-Proof: {proof}")
+                } else {
+                    status.to_string()
+                };
                 requests.push(bytes);
                 write!(socket, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
             }
@@ -283,6 +398,74 @@ mod tests {
             server.join().unwrap();
         }
     }
+    #[test]
+    fn authenticated_health_and_transcription_use_same_private_secret() {
+        let (url, server) = mock_server(vec![
+            ("200 OK with test proof", health_json()),
+            ("200 OK", r#"{"text":"Local only"}"#.into()),
+        ]);
+        assert_eq!(
+            request_authenticated_transcription(
+                &url,
+                Some("private-test-token"),
+                vec![1],
+                Duration::from_secs(5)
+            )
+            .unwrap(),
+            "Local only"
+        );
+        let requests = server.join().unwrap();
+        assert!(!String::from_utf8_lossy(&requests[0])
+            .to_lowercase()
+            .contains("authorization:"));
+        assert!(!String::from_utf8_lossy(&requests[0]).contains("private-test-token"));
+        assert!(String::from_utf8_lossy(&requests[1])
+            .to_lowercase()
+            .contains("authorization: bearer private-test-token"));
+    }
+
+    #[test]
+    fn authenticated_adapter_never_uploads_to_unowned_phonon_server() {
+        let (url, server) = mock_server(vec![("200 OK", health_json())]);
+        assert!(request_authenticated_transcription(
+            &url,
+            Some("private-test-token"),
+            vec![1],
+            Duration::from_secs(5)
+        )
+        .is_err());
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn reflected_health_challenge_cannot_steal_session_key_or_audio() {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut bytes = [0; 4096];
+            let count = socket.read(&mut bytes).unwrap();
+            let request = String::from_utf8_lossy(&bytes[..count]).to_lowercase();
+            assert!(!request.contains("authorization:"));
+            assert!(!request.contains("private-test-token"));
+            let challenge = request
+                .lines()
+                .find_map(|line| line.strip_prefix("x-handy-phonon-challenge: "))
+                .unwrap();
+            let body = health_json();
+            write!(socket, "HTTP/1.1 200 OK\r\nX-Handy-Phonon-Proof: {challenge}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+        });
+        assert!(request_authenticated_transcription(
+            &url,
+            Some("private-test-token"),
+            vec![1],
+            Duration::from_secs(5)
+        )
+        .is_err());
+        server.join().unwrap();
+    }
+
     #[test]
     fn mock_http_never_follows_redirect() {
         use std::io::Write;

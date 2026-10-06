@@ -23,9 +23,10 @@ they are not a code-signing certificate or a cryptographically signed attestatio
 Do not disable security controls to install this application.
 
 The package includes the small upstream Silero VAD helper and runtime libraries,
-but no full speech-recognition model weights, Phonon/Fermion server, user audio,
-transcripts, account data, OAuth credentials or API keys. Runtime model/service
-setup is described in [PHONON_WINDOWS.md](PHONON_WINDOWS.md).
+plus the private Python/Fermion CPU runtime and its dependency licenses. Full
+speech-model weights download only when requested inside Handy. No user audio,
+transcripts, account data, OAuth credentials or API keys are included. Model
+setup is automatic; see [PHONON_WINDOWS.md](PHONON_WINDOWS.md).
 
 Actual microphone capture, hotkeys, paste, GPU inference and ChatGPT plan eligibility
 must be checked on the user's device. A passing hosted build does not establish

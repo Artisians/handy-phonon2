@@ -24,8 +24,9 @@ Based on Handy v0.9.8; this fork is not an official Handy, Fermion, or OpenAI re
 - Download the setup EXE, or extract the portable ZIP and run handy.exe.
 - SHA256SUMS.txt verifies every payload; BUILD_PROVENANCE.json records toolchain and source.
 - **Unsigned:** Windows may warn about an unknown publisher. No code-signing certificate or signed provenance is claimed. Respect device policy; do not disable Windows security.
-- Full speech-model weights, Phonon/Fermion server, user recordings and login credentials are not included.
-- Phonon-2 requires the separately configured local service; see docs/PHONON_WINDOWS.md.
+- Python and the Phonon/Fermion runtime are included internally. Download Phonon-2 inside Handy's model manager, then select it. No separate Python/server setup.
+- Full speech-model weights, user recordings and login credentials are not included.
+- Installed runtime isolation, automatic model setup and actual Phonon speech recognition passed on the hosted Windows runner.
 - Self-updates are disabled. Install reviewed fork releases manually.
 - CLI/payload tests do not validate the microphone, hotkey/paste flow, GPU performance, or real ChatGPT authentication on your PC. Those checks remain required.
 
