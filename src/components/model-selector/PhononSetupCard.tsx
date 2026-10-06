@@ -65,8 +65,18 @@ export const PhononSetupCard: React.FC<PhononSetupCardProps> = ({
   return (
     <section
       className="space-y-2 text-left"
-      onClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        // Descriptive/status text remains part of the selectable model card.
+        // Only independent controls should consume the card's click.
+        if ((event.target as Element).closest("button, details")) {
+          event.stopPropagation();
+        }
+      }}
+      onKeyDown={(event) => {
+        if ((event.target as Element).closest("button, details")) {
+          event.stopPropagation();
+        }
+      }}
     >
       <p className="text-xs text-text/60">{t("phonon.statusNote")}</p>
       {installed && (

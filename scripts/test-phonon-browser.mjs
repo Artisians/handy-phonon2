@@ -60,9 +60,30 @@ try {
   await page.route("**/*", (route) => route.abort());
   await page.setContent('<html><body><main id="root"></main></body></html>');
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
-  await page.getByRole("button").filter({ hasText: "Phonon-2" }).click();
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.getByRole("button").filter({ hasText: "Phonon-2" }).click();
+  await page.getByRole("heading", { name: "Phonon-2", exact: true }).waitFor();
+  // Details are independent, while the descriptive center of the card selects.
+  await page.getByText("Privacy and model details", { exact: true }).click();
+  assert.equal(
+    (await page.evaluate(() => window.calls)).includes("download"),
+    false,
+  );
+  await page.getByText("Privacy and model details", { exact: true }).click();
+  await page
+    .getByText(
+      "English · CPU · Windows x64. Download once, then Handy starts and stops Phonon-2 automatically. No separate setup.",
+      { exact: true },
+    )
+    .click();
+  assert.equal(
+    (await page.evaluate(() => window.calls)).filter((x) => x === "download")
+      .length,
+    1,
+  );
+  // The download control has an aria-label distinct from its visible caption.
+  await page
+    .getByRole("button", { name: "Cancel download", exact: true })
+    .click();
+  await page.getByRole("heading", { name: "Phonon-2", exact: true }).click();
   assert.deepEqual(
     (await page.evaluate(() => window.calls)).filter(
       (x) => x === "download" || x === "cancel-download",
@@ -74,11 +95,7 @@ try {
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
   }
   await page.evaluate(() => window.show("available"));
-  await page
-    .getByRole("button")
-    .filter({ hasText: "Phonon-2" })
-    .first()
-    .click();
+  await page.getByRole("heading", { name: "Phonon-2", exact: true }).click();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   assert.equal(
     await page.getByRole("button", { name: "Cancelling…" }).isDisabled(),
@@ -91,11 +108,7 @@ try {
     1,
   );
   await page.evaluate(() => window.finishCancel());
-  await page
-    .getByRole("button")
-    .filter({ hasText: "Phonon-2" })
-    .first()
-    .click();
+  await page.getByRole("heading", { name: "Phonon-2", exact: true }).click();
   await page.evaluate(() => {
     window.runtime = { state: "error", error: "Startup failed. Retry." };
     window.show("active");
