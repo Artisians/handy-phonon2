@@ -1,0 +1,10 @@
+{
+  "repository": "Artisians/handy-phonon2",
+  "applicationVersion": "0.9.8",
+  "sdk": {
+    "version": "1.4.309.0",
+    "sha256": "48b132169b64fe65cdb0f20970195335a65354e73f1ea5373032c2a8bbad4297",
+    "licenseUrl": "https://vulkan.lunarg.com/software/license/vulkan-1.4.309.0-windows-license-summary.txt",
+    "approvedForTemporaryGitHubBuildMachine": true
+  }
+}

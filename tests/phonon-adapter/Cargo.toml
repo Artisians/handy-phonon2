@@ -1,0 +1,11 @@
+[package]
+name = "handy-phonon-adapter-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1.0.95"
+reqwest = { version = "0.12", features = ["blocking", "multipart", "json"] }
+serde_json = "1"
+hound = "3.5.1"
