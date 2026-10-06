@@ -14,7 +14,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-uti
 sha2 = "0.10"
 base64 = "0.22"
 rand = "0.8"
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 uuid = { version = "1", features = ["v4"] }
 keyring = { version = "3.6", features = ["apple-native", "sync-secret-service", "crypto-rust", "vendored"] }
 [target.'cfg(windows)'.dependencies]
